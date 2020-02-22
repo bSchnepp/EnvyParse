@@ -5,6 +5,7 @@
 #include <wchar.h>
 
 #include <cuda.h>
+#include <ctype.h>
 
 typedef struct Ngram
 {
@@ -17,6 +18,10 @@ typedef struct Word
 	uint16_t Length;
 	Ngram *Content;
 }Word;
+
+/* isspace doesn't compile for device code. */
+#define IS_WHITESPACE(x) (x == ' ' || x == '\n' || x == '\r' || x == '\t' || \
+			x == '\v' || x == '\f')
 
 /*
  * Copies the entirety of a file to GPU memory.
@@ -55,16 +60,14 @@ __global__ void TestFile(void *Src, void *Spaces, uint64_t Length)
 {
 	uint64_t Index = blockIdx.x * blockDim.y + threadIdx.x;
 	char *SrcC = (char*)(Src);
-	char *SpacesC = (char*)(Spaces);
 
 	if (Index < Length)
 	{
-			printf("%c", SrcC[Index]);
-		if (SrcC[Index] == ' ')
+		if (IS_WHITESPACE(SrcC[Index]))
 		{
-			SpacesC[Index] = 1;
+			((char*)(Spaces))[Index] = 1;
 		} else {
-			SpacesC[Index] = 0;
+			((char*)(Spaces))[Index] = 0;
 		}
 	}
 }
@@ -78,11 +81,14 @@ int main(int argc, char **argv)
 
 	uint64_t Length;
 	ReadFile("data_test.txt", &TxtPtr, &Length);
+	cudaDeviceSynchronize();
+
 	printf("Got length of file %lu\n", Length);
-	SpaceBfr = calloc(0, Length);
+	cudaMallocHost(&SpaceBfr, Length);
 	TxtPtrHost = malloc(Length);
 
-	TestFile<<<32, Length / 32>>>(TxtPtr, SpaceBfr, Length);
+	TestFile<<<1, Length>>>(TxtPtr, SpaceBfr, Length);
+	cudaDeviceSynchronize();
 	cudaMemcpy(TxtPtrHost, TxtPtr, Length, cudaMemcpyDeviceToHost);
 	for (uint64_t Index = 0; Index < Length; ++Index)
 	{
@@ -91,9 +97,10 @@ int main(int argc, char **argv)
 			printf("%c", ((char*)(TxtPtrHost))[Index]);	
 		}
 	}
+	printf("\n");
 
 	cudaFree(TxtPtr);
+	cudaFreeHost(SpaceBfr);
 	free(TxtPtrHost);
-	free(SpaceBfr);
 	return 0;
 }
