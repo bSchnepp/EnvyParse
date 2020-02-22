@@ -41,6 +41,16 @@ IN THE SOFTWARE.
 #define IS_WHITESPACE(x) (x == ' ' || x == '\n' || x == '\r' || x == '\t' || \
 			x == '\v' || x == '\f')
 
+
+typedef struct GpuContext
+{
+	/* Team Green calls this a "warp" Insist on calling it a "wavefront". */
+	uint64_t GpuIndex;
+	uint64_t WavefrontCount;
+	uint64_t WavefrontSize; /* Is probably 64??? */
+	uint64_t GpuMemoryAmt;
+}GpuContext;
+
 /*
  * Copies the entirety of a file to GPU memory.
  *
@@ -79,10 +89,12 @@ void ReadFile(const char *Name, void **Dst, uint64_t *OutSize)
 __global__ 
 void TestFile(void *Src, void *Spaces, uint64_t Length)
 {
-	uint64_t Index = blockIdx.x * blockDim.y + threadIdx.x;
+	uint64_t Index = 0;
 	char *SrcC = (char*)(Src);
 
-	if (Index < Length)
+	for (Index = blockIdx.x * blockDim.y + threadIdx.x;
+		Index < Length;
+		Index += blockDim.x * gridDim.x)
 	{
 		if (IS_WHITESPACE(SrcC[Index]))
 		{
@@ -120,7 +132,7 @@ int main(int argc, char **argv)
 
 	/* This performs the best on my GP102. (11GB VRam) */
 	cudaMemPrefetchAsync(SpaceBfr, Length, 0);
-	TestFile<<<Length, 1>>>(TxtPtr, SpaceBfr, Length);
+	TestFile<<<Length/256, 1>>>(TxtPtr, SpaceBfr, Length);
 	cudaDeviceSynchronize();
 	cudaMemcpy(TxtPtrHost, TxtPtr, Length, cudaMemcpyDeviceToHost);
 	for (uint64_t Index = 0; Index < Length; ++Index)
