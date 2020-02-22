@@ -79,15 +79,24 @@ int main(int argc, char **argv)
 	void *SpaceBfr;
 	void *TxtPtrHost;
 
+	if (argc < 2)
+	{
+		fprintf(stderr, "Error: missing file name to read.\n");
+		return -1;
+	}
+	const char *FName = argv[1]; 
+
 	uint64_t Length;
-	ReadFile("data_test.txt", &TxtPtr, &Length);
+	ReadFile(FName, &TxtPtr, &Length);
 	cudaDeviceSynchronize();
 
 	printf("Got length of file %lu\n", Length);
-	cudaMallocHost(&SpaceBfr, Length);
+	cudaMallocManaged(&SpaceBfr, Length);
 	TxtPtrHost = malloc(Length);
 
-	TestFile<<<1, Length>>>(TxtPtr, SpaceBfr, Length);
+	/* This performs the best on my GP102. (11GB VRam) */
+	cudaMemPrefetchAsync(SpaceBfr, Length, 0);
+	TestFile<<<Length, 1>>>(TxtPtr, SpaceBfr, Length);
 	cudaDeviceSynchronize();
 	cudaMemcpy(TxtPtrHost, TxtPtr, Length, cudaMemcpyDeviceToHost);
 	for (uint64_t Index = 0; Index < Length; ++Index)
